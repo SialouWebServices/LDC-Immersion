@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LDC Immersion Tracker — Rodrigue &amp; Henriette</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="manifest" href="./manifest.json">
+    <link rel="icon" type="image/png" href="./pwa-icon-192.png">
+    <link rel="apple-touch-icon" href="./pwa-icon-192.png">
+    <meta name="theme-color" content="#7F77DD">
+    <meta name="description"
+        content="Application collaborative de suivi d'immersion LDC pour Rodrigue &amp; Henriette au Béthel.">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="LDC Immersion Tracker — Rodrigue &amp; Henriette">
+    <meta property="og:description"
+        content="Suivi en temps réel, journal multimédia et synthèse IA de l'immersion LDC au Béthel.">
+    <meta property="og:image" content="./pwa-icon-512.png">
+    <link rel="stylesheet" href="/src/styles/global.css">
+</head>
+
+<body class="user-rodrigue">
+
+    <!-- ===== SPLASH SCREEN ===== -->
+    <div id="splash">
+        <img src="./pwa-icon-512.png" alt="Logo LDC" class="splash-logo">
+        <div class="splash-title">Immersion LDC</div>
+        <div class="splash-sub">15-17 Avril 2025 • CIV Béthel</div>
+        <div class="splash-label">Qui êtes-vous ?</div>
+        <div class="splash-choices">
+            <button class="splash-btn splash-rodrigue" onclick="chooseSplashUser('Rodrigue')">
+                <div class="avatar-big">R</div>
+                Rodrigue
+            </button>
+            <button class="splash-btn splash-henriette" onclick="chooseSplashUser('Henriette')">
+                <div class="avatar-big">H</div>
+                Henriette
+            </button>
+        </div>
+    </div>
+
+    <!-- ===== LOADING ===== -->
+    <div id="loading-overlay" style="display:none;">
+        <div class="loading-spinner"></div>
+        <p style="font-size:13px; color:var(--text-secondary);">Synchronisation en cours...</p>
+    </div>
+
+    <!-- ===== APP ===== -->
+    <div id="toast-container"></div>
+    <div id="app">
+
+        <!-- Sidebar (Desktop) -->
+        <aside id="sidebar">
+            <div class="sidebar-logo-area">
+                <img src="./pwa-icon-512.png" alt="Logo">
+                <span>Immersion LDC</span>
+            </div>
+            <nav class="sidebar-nav" id="sidebar-nav">
+                <div class="nav-item active" onclick="setTab('overview',this)"><span
+                        class="nav-icon">🏠</span><span>Aperçu</span></div>
+                <div class="nav-item" onclick="setTab('poles',this)"><span class="nav-icon">📍</span><span>Pôles</span>
+                </div>
+                <div class="nav-item" onclick="setTab('journal',this)"><span
+                        class="nav-icon">✍️</span><span>Journal</span></div>
+                <div class="nav-item" onclick="setTab('gallery',this)"><span
+                        class="nav-icon">🖼️</span><span>Galerie</span></div>
+                <div class="nav-item" onclick="setTab('contacts',this)"><span
+                        class="nav-icon">👥</span><span>Contacts</span></div>
+                <div class="nav-item" onclick="setTab('ia',this)"><span class="nav-icon">🪄</span><span>Synthèse
+                        IA</span></div>
+            </nav>
+            <div class="sidebar-user">
+                <div class="header-user-btn" onclick="openUserSwitch()">
+                    <div class="header-user-avatar" id="sidebar-avatar">R</div>
+                    <span id="sidebar-username">Rodrigue</span>
+                    <div id="sidebar-presence" class="presence-indicator"></div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main -->
+        <div id="main-wrapper">
+            <header>
+                <img src="./pwa-icon-512.png" alt="Logo" class="header-logo">
+                <div class="header-info">
+                    <h1>Immersion LDC</h1>
+                    <p>15-17 Avril • CIV Béthel</p>
+                </div>
+                <div id="network-indicator" class="sync-dot" title="En ligne"></div>
+                <!-- Theme Toggle -->
+                <button id="theme-toggle" onclick="toggleTheme()" style="background:none;border:none;cursor:pointer;font-size:18px;margin-left:12px;color:var(--text-primary);">🌙</button>
+                <div class="header-user-btn" onclick="openUserSwitch()" style="margin-left:8px;">
+                    <div class="header-user-avatar" id="header-avatar">R</div>
+                    <span id="header-username">Rodrigue</span>
+                    <div id="header-presence" class="presence-indicator"></div>
+                </div>
+            </header>
+
+
+            <main id="main-content"></main>
+        </div>
+
+        <!-- Bottom Navigation (Mobile) -->
+        <nav id="bottom-nav">
+            <div class="nav-item active" onclick="setTab('overview',this)"><span
+                    class="nav-icon">🏠</span><span>Aperçu</span></div>
+            <div class="nav-item" onclick="setTab('poles',this)"><span class="nav-icon">📍</span><span>Pôles</span>
+            </div>
+            <div class="nav-item" onclick="setTab('journal',this)"><span class="nav-icon">✍️</span><span>Journal</span>
+            </div>
+            <div class="nav-item" onclick="setTab('gallery',this)"><span class="nav-icon">🖼️</span><span>Galerie</span>
+            </div>
+            <div class="nav-item" onclick="setTab('contacts',this)"><span
+                    class="nav-icon">👥</span><span>Contacts</span></div>
+            <div class="nav-item" onclick="setTab('ia',this)"><span class="nav-icon">🪄</span><span>IA</span></div>
+        </nav>
+    </div>
+
+    <!-- Side Panel (Pole Details) -->
+    <div id="side-panel" class="side-panel">
+        <div class="panel-header">
+            <h2 id="panel-title" style="font-size:17px; font-weight:700;">Détails</h2>
+            <button class="btn btn-ghost btn-sm" onclick="closePanel()">✕ Fermer</button>
+        </div>
+        <div class="panel-body" id="panel-content"></div>
+    </div>
+
+    <!-- Lightbox -->
+    <div id="lightbox">
+        <div class="lightbox-close" onclick="closeLightbox()">✕</div>
+        <img id="lightbox-img" src="" alt="Aperçu">
+        <div id="lightbox-caption" class="lightbox-caption"></div>
+    </div>
+
+    <!-- Presentation Mode -->
+    <div id="presentation-mode">
+        <div class="lightbox-close" style="z-index:99" onclick="closePresentation()">✕</div>
+        <div id="presentation-content"></div>
+        <div class="presentation-controls">
+            <button class="btn btn-ghost" style="color:white;font-size:24px;" onclick="prevSlide()">◀</button>
+            <span id="slide-counter" style="color:white;font-weight:bold;font-size:18px;">1/10</span>
+            <button class="btn btn-ghost" style="color:white;font-size:24px;" onclick="nextSlide()">▶</button>
+        </div>
+    </div>
+
+    <!-- User switch modal -->
+    <div id="user-switch-modal">
+        <div class="modal-sheet">
+            <div class="modal-title">Changer d'utilisateur</div>
+            <div class="modal-choice modal-choice-r" id="modal-rodrigue"
+                onclick="setUser('Rodrigue'); closeUserSwitch();">
+                <div class="modal-choice-avatar">R</div>
+                <div>
+                    <div style="font-weight:700; color:#3C3489;">Rodrigue</div>
+                    <div style="font-size:12px; color:var(--text-secondary);">Connexion en tant que Rodrigue</div>
+                </div>
+            </div>
+            <div class="modal-choice modal-choice-h" id="modal-henriette"
+                onclick="setUser('Henriette'); closeUserSwitch();">
+                <div class="modal-choice-avatar">H</div>
+                <div>
+                    <div style="font-weight:700; color:#72243E;">Henriette</div>
+                    <div style="font-size:12px; color:var(--text-secondary);">Connexion en tant que Henriette</div>
+                </div>
+            </div>
+            <button class="btn btn-ghost btn-sm" style="width:100%; margin-top:4px;"
+                onclick="closeUserSwitch()">Annuler</button>
+        </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+</body>
+
+</html>

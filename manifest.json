@@ -1,0 +1,21 @@
+{
+  "name": "LDC Immersion Tracker",
+  "short_name": "LDC Tracker",
+  "description": "Suivi collaboratif temps réel pour l'immersion LDC au Béthel.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#7F77DD",
+  "icons": [
+    {
+      "src": "pwa-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "pwa-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ]
+}

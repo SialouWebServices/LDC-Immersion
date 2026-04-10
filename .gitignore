@@ -1,0 +1,9 @@
+node_modules
+.env.local
+dist
+www
+.netlify
+.convex
+.agents
+.claude
+*.log
