@@ -42,10 +42,14 @@ const client = new ConvexClient(CONVEX_URL);
             activeJournalTab: 'text',
             activePoleTab: 'text',
             isEditingProgram: false,
+            isExportingPDF: false,
             pendingMedia: null,
             mediaRecorder: null,
             audioChunks: [],
-            onlineUsers: {}
+            onlineUsers: {},
+            isSyncStarted: false,
+            searchQuery: '',
+            filterAuthor: 'Tous'
         };
 
         // ===== PRESENCE =====
@@ -58,7 +62,7 @@ const client = new ConvexClient(CONVEX_URL);
             }, 5000);
 
             // Subscribe to presence
-            client.watchQuery("presence:list", {}).onUpdate((users) => {
+            client.onUpdate("presence:list", {}, (users) => {
                 state.onlineUsers = {};
                 users.forEach(u => {
                     state.onlineUsers[u.user] = true;
@@ -125,79 +129,141 @@ const client = new ConvexClient(CONVEX_URL);
         function closeUserSwitch() { document.getElementById('user-switch-modal').classList.remove('open'); }
 
         // ===== CONVEX SYNC =====
-        function initSync() {
-            console.log("🚀 Initialisation de la synchronisation Convex...");
+        async function initSync() {
+            if (state.isSyncStarted) return;
+            state.isSyncStarted = true;
+
+            console.log("🚀 Initialisation de la synchronisation Convex (Mode Hybride)...");
             showLoading();
+            setSyncStatus('syncing');
 
-            // Sécurité : Forcer la fermeture du loading après 5 secondes maximum
-            const loadingTimeout = setTimeout(() => {
-                console.warn("⚠️ Délai de synchronisation dépassé, forçage de l'affichage.");
+            try {
+                // 1. Chargement initial (Un-shot) pour débloquer l'UI immédiatement
+                await syncAll();
                 hideLoading();
+                setSyncStatus('synced');
                 render();
-            }, 5000);
-            
-            // Subscribe to Poles
-            client.watchQuery("poles:list", {}).onUpdate((poles) => {
-                console.log("📍 Mise à jour Pôles reçue:", poles);
-                if (poles && poles.length > 0) {
-                    poles.forEach(p => {
-                        const lp = state.poles.find(x => x.id === p.id);
-                        if (lp) {
-                            lp.visited.Rodrigue = p.visited_rodrigue;
-                            lp.visited.Henriette = p.visited_henriette;
-                            lp.notes.Rodrigue = p.notes_rodrigue || '';
-                            lp.notes.Henriette = p.notes_henriette || '';
-                            lp.questions = p.questions || [];
-                        }
-                    });
-                } else if (poles && poles.length === 0) {
-                    console.log("💾 Base de données vide, initialisation des pôles...");
-                    client.mutation("poles:seed", { 
-                        poles: POLES_DATA.map(p => ({ id: p.id, name: p.name })) 
-                    });
-                }
-                clearTimeout(loadingTimeout);
-                hideLoading(); 
-                render();
-                if (state.selectedPoleId) renderPanelContent();
-            });
+                console.log("✅ Chargement initial terminé.");
 
-            // Subscribe to Contacts
-            client.watchQuery("contacts:list", {}).onUpdate((contacts) => {
-                console.log("👥 Mise à jour Contacts reçue:", contacts);
-                state.contacts = contacts;
-                render();
-            });
-
-            // Subscribe to Notes
-            client.watchQuery("notes:list", {}).onUpdate((notes) => {
-                console.log("📝 Mise à jour Notes reçue:", notes);
-                state.generalNotes = notes;
-                render();
-                if (state.selectedPoleId) renderPanelContent();
-            });
-
-            // Subscribe to Programs
-            client.watchQuery("programs:list", {}).onUpdate((programs) => {
-                console.log("📅 Mise à jour Programme reçue:", programs);
-                if (programs && programs.length > 0) {
-                    PROGRAM_DATA = programs.map(p => ({ day: p.day, date: p.date, items: p.items || [] }));
-                    render();
-                }
-            });
+                // 2. Mise en place des abonnements réactifs (Temps réel)
+                setupReactiveSubscriptions();
                 
-            setupPresence();
+                // 3. Présence
+                setupPresence();
+
+            } catch (err) {
+                console.error("❌ Erreur lors de l'initialisation sync:", err);
+                hideLoading();
+                setSyncStatus('error');
+                render();
+                showToast("Erreur de connexion au serveur", "error");
+            }
         }
+
+        function setSyncStatus(status) {
+            const el = document.getElementById('sync-status-indicator');
+            const txt = document.getElementById('sync-status-text');
+            if (!el || !txt) return;
+
+            if (status === 'syncing') {
+                el.classList.add('syncing');
+                txt.textContent = 'Sync...';
+            } else if (status === 'synced') {
+                el.classList.remove('syncing');
+                txt.textContent = 'Synchronisé';
+                // Petit effet de succès temporaire
+                el.style.color = '#4caf50';
+                setTimeout(() => el.style.color = '', 2000);
+            } else {
+                el.classList.remove('syncing');
+                txt.textContent = 'Erreur';
+                el.style.color = '#f44336';
+            }
+        }
+
+        async function syncAll() {
+            console.log("⏳ Récupération des données initiales...");
+            // Pôles
+            const poles = await client.query("poles:list", {});
+            if (poles && poles.length > 0) {
+                updateLocalPoles(poles);
+            } else {
+                console.log("🌱 Initialisation des pôles (Base vide)...");
+                await client.mutation("poles:seed", { poles: POLES_DATA.map(p => ({ id: p.id, name: p.name })) });
+                const newPoles = await client.query("poles:list", {});
+                updateLocalPoles(newPoles);
+            }
+
+            // Notes
+            const notes = await client.query("notes:list", {});
+            state.generalNotes = Array.isArray(notes) ? notes : [];
+
+            // Contacts
+            const contacts = await client.query("contacts:list", {});
+            state.contacts = Array.isArray(contacts) ? contacts : [];
+
+            // Programme
+            const programs = await client.query("programs:list", {});
+            if (programs && programs.length > 0) {
+                PROGRAM_DATA = programs.map(p => ({ day: p.day, date: p.date, items: p.items || [] }));
+            }
+        }
+
+        function updateLocalPoles(poles) {
+            if (!poles) return;
+            poles.forEach(p => {
+                const lp = state.poles.find(x => x.id === p.id);
+                if (lp) {
+                    lp.visited.Rodrigue = p.visited_rodrigue;
+                    lp.visited.Henriette = p.visited_henriette;
+                    lp.notes.Rodrigue = p.notes_rodrigue || '';
+                    lp.notes.Henriette = p.notes_henriette || '';
+                    lp.questions = p.questions || [];
+                }
+            });
+        }
+
+        function setupReactiveSubscriptions() {
+            // Abonnements légers pour les mises à jour en direct
+            client.onUpdate("poles:list", {}, (poles) => {
+                console.log("🔄 Update Réactif: Pôles");
+                updateLocalPoles(poles);
+                render();
+                if (state.selectedPoleId) renderPanelContent();
+            });
+
+            client.onUpdate("notes:list", {}, (notes) => {
+                console.log("🔄 Update Réactif: Notes");
+                state.generalNotes = Array.isArray(notes) ? notes : [];
+                render();
+                if (state.selectedPoleId) renderPanelContent();
+            });
+
+            client.onUpdate("contacts:list", {}, (contacts) => {
+                console.log("🔄 Update Réactif: Contacts");
+                state.contacts = Array.isArray(contacts) ? contacts : [];
+                render();
+            });
+        }
+
+
 
 
         // ===== NAVIGATION =====
         function setTab(tab, el) {
             state.currentTab = tab;
-            // Update all nav items across bottom-nav AND sidebar
-            document.querySelectorAll('#bottom-nav .nav-item, #sidebar-nav .nav-item').forEach(n => n.classList.remove('active'));
-            // Find matching items and activate
-            document.querySelectorAll(`#bottom-nav .nav-item, #sidebar-nav .nav-item`).forEach(n => {
-                if (n.getAttribute('onclick') && n.getAttribute('onclick').includes(`'${tab}'`)) n.classList.add('active');
+            console.log(`🚀 Changement d'onglet: ${tab}`);
+            
+            // Update all nav items
+            const navItems = document.querySelectorAll('.nav-item');
+            navItems.forEach(n => {
+                n.classList.remove('active');
+                // Check match by class OR by setTab argument in onclick
+                const isOnclickMatch = n.getAttribute('onclick') && n.getAttribute('onclick').includes(`'${tab}'`);
+                const isClassMatch = n.classList.contains(`nav-${tab}`);
+                if (isOnclickMatch || isClassMatch) {
+                    n.classList.add('active');
+                }
             });
             render();
         }
@@ -233,10 +299,10 @@ const client = new ConvexClient(CONVEX_URL);
                 <div class="progress-bar-wrap"><div class="progress-fill" style="width:${progress}%"></div></div>
             </div>
             <div class="stats-grid">
-                <div class="stat-card"><span class="stat-value">${stats.poles}</span><span class="stat-label">Pôles</span></div>
-                <div class="stat-card"><span class="stat-value">${stats.notes}</span><span class="stat-label">Notes pôles</span></div>
-                <div class="stat-card"><span class="stat-value">${stats.journal}</span><span class="stat-label">Journal</span></div>
-                <div class="stat-card"><span class="stat-value">${stats.contacts}</span><span class="stat-label">Contacts</span></div>
+                <div class="stat-card stat-poles"><span class="stat-value">${stats.poles}</span><span class="stat-label">Pôles</span></div>
+                <div class="stat-card stat-notes"><span class="stat-value">${stats.notes}</span><span class="stat-label">Notes pôles</span></div>
+                <div class="stat-card stat-journal"><span class="stat-value">${stats.journal}</span><span class="stat-label">Journal</span></div>
+                <div class="stat-card stat-contacts"><span class="stat-value">${stats.contacts}</span><span class="stat-label">Contacts</span></div>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
                 <h3 class="section-title" style="margin:0;">📅 Programme</h3>
@@ -245,7 +311,7 @@ const client = new ConvexClient(CONVEX_URL);
                 </span>
             </div>
             ${PROGRAM_DATA.map((day, dIdx) => `
-                <div class="card program-card">
+                <div class="card program-card program-day-${dIdx}">
                     <div class="program-day-title">📆 ${day.date}</div>
                     ${day.items.map((item, iIdx) => `
                         <div class="program-item">
@@ -274,7 +340,7 @@ const client = new ConvexClient(CONVEX_URL);
                     : isR ? '<span class="visit-tag tag-rodrigue">R</span>'
                         : isH ? '<span class="visit-tag tag-henriette">H</span>' : '';
                 return `
-                        <div class="pole-card ${state.selectedPoleId === pole.id ? 'selected' : ''}" onclick="openPoleDetails('${pole.id}')">
+                        <div class="pole-card pole-theme-${pole.id} ${state.selectedPoleId === pole.id ? 'selected' : ''}" onclick="openPoleDetails('${pole.id}')">
                             <div class="pole-icon">${pole.icon}</div>
                             <div class="pole-name">${pole.name}</div>
                             <div class="pole-desc">${pole.desc}</div>
@@ -323,7 +389,7 @@ const client = new ConvexClient(CONVEX_URL);
             if (!pole) return;
             const isVisited = pole.visited[state.currentUser];
             document.getElementById('panel-content').innerHTML = `
-            <div class="card" style="display:flex;justify-content:space-between;align-items:center;background:${isVisited ? 'var(--user-bg)' : 'white'}">
+            <div class="card visit-status-card ${isVisited ? 'is-visited' : ''}" style="display:flex;justify-content:space-between;align-items:center;">
                 <span style="font-weight:600;">Visité par ${state.currentUser} ?</span>
                 <button class="btn ${isVisited ? 'btn-primary' : 'btn-ghost'} btn-sm" onclick="toggleVisit('${pole.id}')">
                     ${isVisited ? '✓ OUI' : 'NON'}
@@ -349,34 +415,79 @@ const client = new ConvexClient(CONVEX_URL);
 
             <h3 class="section-title" style="margin-top:20px; display:flex; justify-content:space-between; align-items:center;">
                 Questions
-                <button class="btn btn-ghost btn-sm" style="font-size:10px; color:var(--user-main);" onclick="generateSmartQuestions('${pole.id}')">💡 Suggérer des questions</button>
+                <button class="btn btn-ghost btn-sm" style="font-size:10px; color:var(--user-main);" onclick="generateSmartQuestions('${pole.id}')">🪄 Suggérer via IA</button>
             </h3>
-            <div style="display:flex;gap:8px;margin-bottom:12px;">
-                <input type="text" id="new-question" placeholder="Ajouter une question..." style="flex:1;">
-                <button class="btn btn-primary btn-sm" onclick="addQuestionRemote('${pole.id}')">+</button>
-            </div>
-            ${pole.questions.map((q, idx) => `
-                <div class="question-card">
-                    <div>
-                        <div style="font-size:13px;">${q.text}</div>
-                        <div style="font-size:10px;color:var(--text-secondary);">Par ${q.by}</div>
+            
+            <div id="questions-list">
+                ${pole.questions.length === 0 ? '<p style="color:var(--text-secondary);font-size:13px;padding:10px 0;">Aucune question pour le moment.</p>' : pole.questions.map((q, idx) => `
+                    <div class="card question-card">
+                        <div style="flex:1;">
+                            <div style="font-size:14px; color:var(--text-primary); line-height:1.4;">${q.text}</div>
+                            <div style="font-size:10px; color:var(--text-secondary); margin-top:4px; font-weight:600;">Par ${q.by}</div>
+                        </div>
+                        <button class="btn btn-ghost btn-sm" onclick="deleteQuestionRemote('${pole.id}',${idx})" style="opacity:0.6;">✕</button>
                     </div>
-                    <button class="btn btn-ghost btn-sm" onclick="deleteQuestionRemote('${pole.id}',${idx})">✕</button>
-                </div>
-            `).join('')}
+                `).join('')}
+            </div>
+
+            <div class="manual-question-input">
+                <input type="text" id="new-question" placeholder="Poser une question spécifique..." style="flex:1;">
+                <button class="btn btn-primary btn-sm" onclick="addQuestionRemote('${pole.id}')">Ajouter</button>
+            </div>
         `;
         }
 
         // --- Journal ---
         function renderJournal(container) {
+            const filteredNotes = state.generalNotes.filter(n => {
+                if (n.pole_id) return false;
+                const matchesSearch = !state.searchQuery || 
+                                     (n.content && n.content.toLowerCase().includes(state.searchQuery.toLowerCase())) ||
+                                     (n.title && n.title.toLowerCase().includes(state.searchQuery.toLowerCase()));
+                const matchesAuthor = state.filterAuthor === 'Tous' || n.author === state.filterAuthor;
+                return matchesSearch && matchesAuthor;
+            });
+
             container.innerHTML = `
             ${renderCaptureArea('journal')}
-            <h3 class="section-title" style="margin-top:4px;">📒 Mes Notes</h3>
-            ${state.generalNotes.filter(n => !n.pole_id).length === 0
-                    ? '<p style="color:var(--text-secondary);font-size:13px;text-align:center;padding:20px 0;">Aucune note pour le moment.</p>'
-                    : state.generalNotes.filter(n => !n.pole_id).map(n => renderNoteCard(n)).join('')
+            
+            <div class="journal-filter-bar">
+                <div class="search-input-wrap">
+                    <span class="search-icon">🔍</span>
+                    <input type="text" id="journal-search" placeholder="Rechercher une note..." 
+                           value="${state.searchQuery}" oninput="updateJournalSearch(this.value)">
+                </div>
+                <div class="filter-chips">
+                    <div class="filter-chip ${state.filterAuthor === 'Tous' ? 'active' : ''}" onclick="updateJournalFilter('Tous')">Tous</div>
+                    <div class="filter-chip ${state.filterAuthor === 'Rodrigue' ? 'active' : ''}" onclick="updateJournalFilter('Rodrigue')">Rodrigue</div>
+                    <div class="filter-chip ${state.filterAuthor === 'Henriette' ? 'active' : ''}" onclick="updateJournalFilter('Henriette')">Henriette</div>
+                </div>
+            </div>
+
+            <h3 class="section-title" style="margin-top:4px;">📒 Mes Notes (${filteredNotes.length})</h3>
+            ${filteredNotes.length === 0
+                    ? `<p style="color:var(--text-secondary);font-size:13px;text-align:center;padding:20px 0;">
+                        ${state.searchQuery || state.filterAuthor !== 'Tous' ? 'Aucun résultat pour cette recherche.' : 'Aucune note pour le moment.'}
+                       </p>`
+                    : filteredNotes.map((n, idx) => renderNoteCard(n, idx)).join('')
                 }
         `;
+        }
+
+        function updateJournalSearch(val) {
+            state.searchQuery = val;
+            render();
+            // Refocus search input
+            const input = document.getElementById('journal-search');
+            if (input) {
+                input.focus();
+                input.setSelectionRange(val.length, val.length);
+            }
+        }
+
+        function updateJournalFilter(author) {
+            state.filterAuthor = author;
+            render();
         }
 
         // --- Galerie ---
@@ -425,8 +536,8 @@ const client = new ConvexClient(CONVEX_URL);
                 <textarea id="c-memo" placeholder="Mémo (téléphone, email, infos...)" rows="2" style="margin-bottom:8px;"></textarea>
                 <button class="btn btn-primary" onclick="addContactRemote()">➕ Ajouter le contact</button>
             </div>
-            ${state.contacts.map(c => `
-                <div class="contact-card">
+            ${state.contacts.map((c, idx) => `
+                <div class="contact-card palette-${idx % 5}">
                     <div class="contact-avatar">${c.name.charAt(0).toUpperCase()}</div>
                     <div style="flex:1;">
                         <div style="font-weight:600;">${c.name}</div>
@@ -447,12 +558,14 @@ const client = new ConvexClient(CONVEX_URL);
                 <div class="ia-btn-row">
                     <button class="btn btn-primary" onclick="generateReport()">🪄 Synthèse Globale</button>
                     <button class="btn btn-primary" style="background:#6366f1;" onclick="generateActionPlan()">📋 Plan d'Action</button>
-                    <button class="btn btn-ghost" style="background:#4caf50;color:white;" onclick="exportToPDF()">📄 Exporter PDF</button>
-                    <button class="btn btn-primary" style="background:var(--henriette-main);color:white;grid-column: 1 / -1;" onclick="startPresentation()">📽️ Lancer le Débriefing</button>
+                    <button class="btn btn-ghost" style="background:#4caf50;color:white;" onclick="exportToPDF()" ${state.isExportingPDF ? 'disabled' : ''}>
+                        ${state.isExportingPDF ? '⏳ Export...' : '📄 Exporter PDF'}
+                    </button>
+                    <button class="btn btn-ia-premium" style="grid-column: 1 / -1;" onclick="startPresentation()">📽️ Lancer le Débriefing</button>
                 </div>
             </div>
 
-            ${state.isGeneratingIA || state.isGeneratingActionPlan ? '<p style="text-align:center;padding:20px;">⏳ Analyse IA en cours...</p>' : ''}
+            ${state.isGeneratingIA || state.isGeneratingActionPlan || state.isExportingPDF ? `<p style="text-align:center;padding:20px;">⏳ ${state.isExportingPDF ? 'Export PDF en cours...' : 'Analyse IA en cours...'}</p>` : ''}
             
             ${state.iaActionPlan ? `
                 <div class="card" style="border-left:4px solid #6366f1; margin-bottom:20px;">
@@ -653,17 +766,19 @@ const client = new ConvexClient(CONVEX_URL);
             }
 
             const noteData = {
-                title: title || null,
-                content: content || null,
+                ...(title && { title }),
+                ...(content && { content }),
                 author: state.currentUser,
-                media_type: state.pendingMedia?.type || null,
-                media_url: state.pendingMedia?.url || null, // storageId
-                pole_id: poleId || null,
+                ...(state.pendingMedia?.type && { media_type: state.pendingMedia.type }),
+                ...(state.pendingMedia?.url && { media_url: state.pendingMedia.url }),
+                ...(poleId && { pole_id: poleId }),
                 created_at: new Date().toISOString()
             };
 
+            setSyncStatus('syncing');
             try {
                 await client.mutation("notes:add", noteData);
+                setSyncStatus('synced');
                 console.log('✅ Note saved to Convex');
                 showToast('✅ Note enregistrée !');
                 
@@ -680,6 +795,7 @@ const client = new ConvexClient(CONVEX_URL);
                 if (context === 'pole') renderPanelContent();
                 render();
             } catch (err) {
+                setSyncStatus('error');
                 console.error('❌ Sync Error (saveNoteRemote):', err);
                 showToast('Erreur de sauvegarde : ' + err.message, 'error');
             }
@@ -687,7 +803,7 @@ const client = new ConvexClient(CONVEX_URL);
 
 
         // ===== NOTE CARD =====
-        function renderNoteCard(n) {
+        function renderNoteCard(n, idx = 0) {
             let media = '';
             if (n.media_type === 'image') media = `<div class="media-preview-container" onclick="openLightbox('${n.media_url}', '${n.title || ''}', '${n.author}')" style="cursor:zoom-in;"><img src="${n.media_url}" alt="Photo"></div>`;
             if (n.media_type === 'video') media = `<div class="media-preview-container"><video controls src="${n.media_url}"></video></div>`;
@@ -696,7 +812,7 @@ const client = new ConvexClient(CONVEX_URL);
 
             const authorColor = n.author === 'Rodrigue' ? 'var(--rodrigue-main)' : 'var(--henriette-main)';
             return `
-            <div class="note-card">
+            <div class="note-card palette-${idx % 5}">
                 <div class="note-card-header">
                     <div>${poleTag}<b>${n.title || (n.media_type ? n.media_type : 'Note')}</b></div>
                     <button class="btn btn-ghost btn-sm" onclick="deleteNoteRemote('${n._id}')">✕</button>
@@ -712,10 +828,13 @@ const client = new ConvexClient(CONVEX_URL);
 
         async function deleteNoteRemote(id) {
             if (confirm('Supprimer cette note ?')) {
+                setSyncStatus('syncing');
                 try {
                     await client.mutation("notes:remove", { id });
+                    setSyncStatus('synced');
                     showToast('🗑️ Note supprimée');
                 } catch (err) {
+                    setSyncStatus('error');
                     console.error('❌ Sync Error (deleteNote):', err);
                     showToast('Erreur suppression : ' + err.message, 'error');
                 }
@@ -740,6 +859,7 @@ const client = new ConvexClient(CONVEX_URL);
 
         // ===== POLES ACTIONS =====
         async function toggleVisit(poleId) {
+            setSyncStatus('syncing');
             const pole = state.poles.find(p => p.id === poleId);
             const newValue = !pole.visited[state.currentUser];
             
@@ -749,22 +869,27 @@ const client = new ConvexClient(CONVEX_URL);
                     user: state.currentUser, 
                     value: newValue 
                 });
+                setSyncStatus('synced');
                 showToast(newValue ? '📍 Passage validé' : '📍 Passage annulé');
             } catch (err) {
+                setSyncStatus('error');
                 console.error('❌ Sync Error (toggleVisit):', err);
                 showToast('Erreur visite: ' + err.message, 'error');
             }
         }
 
         async function updateNoteRemote(poleId, user, value) {
+            setSyncStatus('syncing');
             try {
                 await client.mutation("poles:updateNote", { 
                     id: poleId, 
                     user: user, 
                     value: value 
                 });
+                setSyncStatus('synced');
                 console.log(`✅ Pole note updated for ${user}`);
             } catch (err) {
+                setSyncStatus('error');
                 console.error('❌ Sync Error (updateNote):', err);
                 showToast('Erreur note pôle: ' + err.message, 'error');
             }
@@ -774,16 +899,18 @@ const client = new ConvexClient(CONVEX_URL);
             const input = document.getElementById('new-question');
             const text = input ? input.value.trim() : '';
             if (!text) return;
-
+            setSyncStatus('syncing');
             try {
                 await client.mutation("poles:addQuestion", { 
                     id: poleId, 
                     text: text, 
                     by: state.currentUser 
                 });
+                setSyncStatus('synced');
                 showToast('💡 Question ajoutée');
                 if (input) input.value = '';
             } catch (err) {
+                setSyncStatus('error');
                 console.error('❌ Sync Error (addQuestion):', err);
                 showToast('Erreur question: ' + err.message, 'error');
             }
@@ -791,13 +918,16 @@ const client = new ConvexClient(CONVEX_URL);
 
         async function deleteQuestionRemote(poleId, idx) {
             if (confirm('Supprimer cette question ?')) {
+                setSyncStatus('syncing');
                 try {
                     await client.mutation("poles:deleteQuestion", { 
                         id: poleId, 
                         index: idx 
                     });
+                    setSyncStatus('synced');
                     showToast('🗑️ Question supprimée');
                 } catch (err) {
+                    setSyncStatus('error');
                     console.error('❌ Sync Error (deleteQuestion):', err);
                     showToast('Erreur question: ' + err.message, 'error');
                 }
@@ -814,30 +944,35 @@ const client = new ConvexClient(CONVEX_URL);
 
             const contactData = {
                 name,
-                role: roleEl.value || null,
-                memo: memoEl.value.trim() || null,
+                ...(roleEl.value && { role: roleEl.value }),
+                ...(memoEl.value.trim() && { memo: memoEl.value.trim() }),
                 added_by: state.currentUser,
                 created_at: new Date().toISOString()
             };
 
+            setSyncStatus('syncing');
             try {
                 await client.mutation("contacts:add", contactData);
-                
+                setSyncStatus('synced');
                 // Clear inputs
                 nameEl.value = '';
                 if (memoEl) memoEl.value = '';
                 showToast('👥 Contact ajouté');
             } catch (err) {
+                setSyncStatus('error');
                 console.error('❌ Sync Error (addContact):', err);
                 showToast('Erreur contact: ' + err.message, 'error');
             }
         }
         async function deleteContactRemote(id) {
             if (confirm('Supprimer ce contact ?')) {
+                setSyncStatus('syncing');
                 try {
                     await client.mutation("contacts:remove", { id });
+                    setSyncStatus('synced');
                     showToast('🗑️ Contact supprimé');
                 } catch (err) {
+                    setSyncStatus('error');
                     console.error('❌ Sync Error (deleteContact):', err);
                     showToast('Erreur contact: ' + err.message, 'error');
                 }
@@ -860,12 +995,18 @@ const client = new ConvexClient(CONVEX_URL);
             await syncPrograms(); 
         }
         async function syncPrograms() {
-            for (const day of PROGRAM_DATA) {
-                client.mutation("programs:upsert", { 
-                    day: day.day, 
-                    date: day.date, 
-                    items: day.items 
-                });
+            setSyncStatus('syncing');
+            try {
+                for (const day of PROGRAM_DATA) {
+                    await client.mutation("programs:upsert", { 
+                        day: day.day, 
+                        date: day.date, 
+                        items: day.items 
+                    });
+                }
+                setSyncStatus('synced');
+            } catch (err) {
+                setSyncStatus('error');
             }
         }
 
@@ -962,8 +1103,12 @@ Utilise des émojis et reste très pédagogique.`;
         }
 
         async function exportToPDF() {
+            state.isExportingPDF = true;
+            render();
+            showToast('⏳ Préparation du PDF...', 'info');
+
             const d = document.createElement('div');
-            d.style.cssText = 'padding:40px;font-family:Arial,sans-serif;max-width:800px;';
+            d.style.cssText = 'padding:40px;font-family:Arial,sans-serif;max-width:800px;background:white;color:black;';
             d.innerHTML = `
             <div style="text-align:center;margin-bottom:40px;">
                 <h1 style="color:#7F77DD;font-size:28px;">Rapport d'Immersion LDC</h1>
@@ -979,13 +1124,21 @@ Utilise des émojis et reste très pédagogique.`;
             ${state.contacts.map(c => `<div><b>${c.name}</b> — ${c.role || ''} ${c.memo ? '• ' + c.memo : ''}</div>`).join('')}
             ${state.iaReport ? `<h2 style="border-bottom:2px solid #7F77DD;padding-bottom:10px;margin-top:30px;">🪄 Synthèse IA</h2><div style="white-space:pre-wrap;font-size:13px;">${state.iaReport}</div>` : ''}
         `;
-            html2pdf().from(d).set({
-                margin: 10,
-                filename: `Immersion_LDC_${new Date().toISOString().split('T')[0]}.pdf`,
-                image: { type: 'jpeg', quality: 0.98 },
-                html2canvas: { scale: 2 },
-                jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-            }).save();
+            try {
+                await html2pdf().from(d).set({
+                    margin: 10,
+                    filename: `Immersion_LDC_${new Date().toISOString().split('T')[0]}.pdf`,
+                    image: { type: 'jpeg', quality: 0.98 },
+                    html2canvas: { scale: 2 },
+                    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+                }).save();
+                showToast('✅ PDF exporté avec succès !');
+            } catch (err) {
+                showToast("Erreur lors de l'export PDF", "error");
+            } finally {
+                state.isExportingPDF = false;
+                render();
+            }
         }
 
         // ===== PRESENTATION MODE =====

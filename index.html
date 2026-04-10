@@ -58,17 +58,18 @@
                 <span>Immersion LDC</span>
             </div>
             <nav class="sidebar-nav" id="sidebar-nav">
-                <div class="nav-item active" onclick="setTab('overview',this)"><span
+                <div class="nav-item nav-overview active" onclick="setTab('overview',this)"><span
                         class="nav-icon">🏠</span><span>Aperçu</span></div>
-                <div class="nav-item" onclick="setTab('poles',this)"><span class="nav-icon">📍</span><span>Pôles</span>
+                <div class="nav-item nav-poles" onclick="setTab('poles',this)"><span
+                        class="nav-icon">📍</span><span>Pôles</span>
                 </div>
-                <div class="nav-item" onclick="setTab('journal',this)"><span
-                        class="nav-icon">✍️</span><span>Journal</span></div>
-                <div class="nav-item" onclick="setTab('gallery',this)"><span
+                <div class="nav-item nav-journal" onclick="setTab('journal',this)"><span
+                        class="nav-icon">✍️</span><span>Cahier de notes</span></div>
+                <div class="nav-item nav-gallery" onclick="setTab('gallery',this)"><span
                         class="nav-icon">🖼️</span><span>Galerie</span></div>
-                <div class="nav-item" onclick="setTab('contacts',this)"><span
+                <div class="nav-item nav-contacts" onclick="setTab('contacts',this)"><span
                         class="nav-icon">👥</span><span>Contacts</span></div>
-                <div class="nav-item" onclick="setTab('ia',this)"><span class="nav-icon">🪄</span><span>Synthèse
+                <div class="nav-item nav-ia" onclick="setTab('ia',this)"><span class="nav-icon">🪄</span><span>Synthèse
                         IA</span></div>
             </nav>
             <div class="sidebar-user">
@@ -89,8 +90,15 @@
                     <p>15-17 Avril • CIV Béthel</p>
                 </div>
                 <div id="network-indicator" class="sync-dot" title="En ligne"></div>
+                
+                <!-- V2: Sync Status -->
+                <div id="sync-status-indicator" class="sync-status" style="margin-left: 10px;">
+                    <span>☁️</span> <small id="sync-status-text">Synchronisé</small>
+                </div>
+
                 <!-- Theme Toggle -->
-                <button id="theme-toggle" onclick="toggleTheme()" style="background:none;border:none;cursor:pointer;font-size:18px;margin-left:12px;color:var(--text-primary);">🌙</button>
+                <button id="theme-toggle" onclick="toggleTheme()"
+                    style="background:none;border:none;cursor:pointer;font-size:18px;margin-left:12px;color:var(--text-primary);">🌙</button>
                 <div class="header-user-btn" onclick="openUserSwitch()" style="margin-left:8px;">
                     <div class="header-user-avatar" id="header-avatar">R</div>
                     <span id="header-username">Rodrigue</span>
@@ -104,17 +112,21 @@
 
         <!-- Bottom Navigation (Mobile) -->
         <nav id="bottom-nav">
-            <div class="nav-item active" onclick="setTab('overview',this)"><span
+            <div class="nav-item nav-overview active" onclick="setTab('overview',this)"><span
                     class="nav-icon">🏠</span><span>Aperçu</span></div>
-            <div class="nav-item" onclick="setTab('poles',this)"><span class="nav-icon">📍</span><span>Pôles</span>
+            <div class="nav-item nav-poles" onclick="setTab('poles',this)"><span
+                    class="nav-icon">📍</span><span>Pôles</span>
             </div>
-            <div class="nav-item" onclick="setTab('journal',this)"><span class="nav-icon">✍️</span><span>Journal</span>
+            <div class="nav-item nav-journal" onclick="setTab('journal',this)"><span
+                    class="nav-icon">✍️</span><span>Journal</span>
             </div>
-            <div class="nav-item" onclick="setTab('gallery',this)"><span class="nav-icon">🖼️</span><span>Galerie</span>
+            <div class="nav-item nav-gallery" onclick="setTab('gallery',this)"><span
+                    class="nav-icon">🖼️</span><span>Galerie</span>
             </div>
-            <div class="nav-item" onclick="setTab('contacts',this)"><span
+            <div class="nav-item nav-contacts" onclick="setTab('contacts',this)"><span
                     class="nav-icon">👥</span><span>Contacts</span></div>
-            <div class="nav-item" onclick="setTab('ia',this)"><span class="nav-icon">🪄</span><span>IA</span></div>
+            <div class="nav-item nav-ia" onclick="setTab('ia',this)"><span class="nav-icon">🪄</span><span>IA</span>
+            </div>
         </nav>
     </div>
 

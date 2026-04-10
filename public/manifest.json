@@ -1,4 +1,5 @@
 {
+  "id": "com.sialouwebservices.ldcimmersion",
   "name": "LDC Immersion Tracker",
   "short_name": "LDC Tracker",
   "description": "Suivi collaboratif temps réel pour l'immersion LDC au Béthel.",
